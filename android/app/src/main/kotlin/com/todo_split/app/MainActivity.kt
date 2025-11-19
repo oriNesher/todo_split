@@ -1,4 +1,4 @@
-package com.example.todo_split
+package com.todo_split.app
 
 import io.flutter.embedding.android.FlutterActivity
 
