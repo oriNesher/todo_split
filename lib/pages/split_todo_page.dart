@@ -231,6 +231,7 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
       r.currentId = t.id;
     });
     _save();
+    _applyAutoCollapse();
   }
 
   void _clearCurrentOf(Task r) {
@@ -239,6 +240,7 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
       r.currentId = null;
     });
     _save();
+    _applyAutoCollapse();
   }
 
   bool _subtreeContainsId(Task t, String id) {
@@ -518,8 +520,7 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
                                 color: Theme.of(ctx).colorScheme.primary),
                             const SizedBox(width: 8),
                             Expanded(
-                              child: Text(
-                                  due == null ? 'None' : fmtDate(due!)),
+                              child: Text(due == null ? 'None' : fmtDate(due!)),
                             ),
                             TextButton(
                               onPressed: () async {
@@ -904,6 +905,59 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
     );
   }
 
+  void _applyAutoCollapse() {
+    final r = _currentRoot;
+    if (r == null) return;
+
+    final Set<String> nextCollapsed = {};
+
+    // helper: add all tasks with children as collapsed
+    void markAllCollapsed(Task t) {
+      if (t.children.isNotEmpty) {
+        nextCollapsed.add(t.id);
+        for (final c in t.children) {
+          markAllCollapsed(c);
+        }
+      }
+    }
+
+    // start by collapsing everything
+    markAllCollapsed(r);
+
+    // if there is a CURRENT task → expand only its direct children
+    if (r.currentId != null) {
+      Task? current;
+      void find(Task t) {
+        if (t.id == r.currentId) {
+          current = t;
+          return;
+        }
+        for (final c in t.children) {
+          if (current != null) return;
+          find(c);
+        }
+      }
+
+      find(r);
+
+      if (current != null) {
+        // open CURRENT itself
+        nextCollapsed.remove(current!.id);
+
+        // open ONLY direct children of CURRENT
+        for (final c in current!.children) {
+          nextCollapsed.remove(c.id);
+        }
+      }
+    }
+
+    setState(() {
+      _collapsedTaskIds
+        ..clear()
+        ..addAll(nextCollapsed);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_loaded) {
@@ -943,7 +997,6 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
             ? const Text('Split To-Do')
             : Row(
                 children: [
-
                   Expanded(
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<int>(
@@ -962,6 +1015,7 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
                         onChanged: (v) {
                           if (v == null) return;
                           setState(() => _currentIndex = v);
+                          _applyAutoCollapse();
                         },
                       ),
                     ),
