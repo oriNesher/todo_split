@@ -55,6 +55,10 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
       } catch (_) {}
     }
     setState(() => _loaded = true);
+
+    // Apply initial auto-collapse once data is loaded
+    _applyAutoCollapse();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _roots.isEmpty) _promptForNewList();
     });
@@ -906,55 +910,66 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
   }
 
   void _applyAutoCollapse() {
-    final r = _currentRoot;
-    if (r == null) return;
+    final root = _currentRoot;
+    if (root == null) return;
 
-    final Set<String> nextCollapsed = {};
+    final Set<String> collapsed = {};
 
-    // helper: add all tasks with children as collapsed
-    void markAllCollapsed(Task t) {
+    // 1) Collapse all tasks that have children
+    void collect(Task t) {
       if (t.children.isNotEmpty) {
-        nextCollapsed.add(t.id);
-        for (final c in t.children) {
-          markAllCollapsed(c);
-        }
+        collapsed.add(t.id);
+      }
+      for (final c in t.children) {
+        collect(c);
       }
     }
 
-    // start by collapsing everything
-    markAllCollapsed(r);
+    collect(root);
 
-    // if there is a CURRENT task → expand only its direct children
-    if (r.currentId != null) {
-      Task? current;
-      void find(Task t) {
-        if (t.id == r.currentId) {
-          current = t;
-          return;
-        }
-        for (final c in t.children) {
-          if (current != null) return;
-          find(c);
-        }
+    // Root must always be expanded
+    collapsed.remove(root.id);
+
+    // 2) No CURRENT → expand only root's direct children
+    if (root.currentId == null) {
+      for (final c in root.children) {
+        collapsed.remove(c.id);
       }
 
-      find(r);
+      setState(() {
+        _collapsedTaskIds
+          ..clear()
+          ..addAll(collapsed);
+      });
+      return;
+    }
 
-      if (current != null) {
-        // open CURRENT itself
-        nextCollapsed.remove(current!.id);
-
-        // open ONLY direct children of CURRENT
-        for (final c in current!.children) {
-          nextCollapsed.remove(c.id);
-        }
+    Task? current;
+    void find(Task t) {
+      if (t.id == root.currentId) {
+        current = t;
+        return;
       }
+      for (final c in t.children) {
+        if (current != null) return;
+        find(c);
+      }
+    }
+
+    find(root);
+
+    if (current == null) return;
+
+    // Open ONLY the parents chain (exclude CURRENT itself)
+    final path = current!.pathFromRoot();
+    for (int i = 0; i < path.length - 1; i++) {
+      collapsed.remove(path[i].id);
     }
 
     setState(() {
       _collapsedTaskIds
         ..clear()
-        ..addAll(nextCollapsed);
+        ..addAll(collapsed);
     });
   }
 

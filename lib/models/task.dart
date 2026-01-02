@@ -36,6 +36,8 @@ class Task {
     return d;
   }
 
+  get allTasks => null;
+
   List<Task> pathFromRoot() {
     final path = <Task>[];
     Task? cur = this;
