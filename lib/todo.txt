@@ -1,0 +1,108 @@
+  // TODO: Move list management logic to ListsController
+  
+
+    // list ops
+  void _promptForNewList() {
+    final ctl = TextEditingController();
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Text("Create a new list"),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Final goal (e.g., Build a portfolio website)',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (_) => _createList(ctl.text),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => _createList(ctl.text),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _createList(String title) {
+    Navigator.of(context).maybePop();
+    final t = title.trim();
+    if (t.isEmpty) return;
+    _snapshot();
+    final root = Task(id: _newId(), title: t);
+    setState(() {
+      _roots.add(root);
+      _currentIndex = _roots.length - 1;
+    });
+    _save();
+  }
+
+  void _renameCurrentList() {
+    final r = _currentRoot;
+    if (r == null) return;
+    final ctl = TextEditingController(text: r.title);
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Rename list'),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final t = ctl.text.trim();
+              if (t.isEmpty) return;
+              _snapshot();
+              setState(() => r.title = t);
+              _save();
+              Navigator.pop(context);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _deleteCurrentList() async {
+    final r = _currentRoot;
+    if (r == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete this list?'),
+        content: Text('This will delete “${r.title}” and all its tasks.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      _snapshot();
+      setState(() {
+        _roots.removeAt(_currentIndex);
+        if (_roots.isEmpty) {
+          _currentIndex = 0;
+        } else {
+          _currentIndex = (_currentIndex - 1).clamp(0, _roots.length - 1);
+        }
+      });
+      _save();
+      if (_roots.isEmpty) _promptForNewList();
+    }
+  }

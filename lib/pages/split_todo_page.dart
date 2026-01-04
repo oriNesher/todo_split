@@ -1,35 +1,35 @@
-import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:todo_split/pages/achievements_board.dart';
-import 'package:todo_split/pages/lists_overview_page.dart';
 
 import '../models/task.dart';
 import '../utils/color_utils.dart';
 import '../utils/date_utils.dart';
 
 class SplitTodoPage extends StatefulWidget {
-  const SplitTodoPage({super.key});
+  final Task root;
+  final VoidCallback onSave;
+  final VoidCallback? onBeforeChange;
+  final VoidCallback onUndo;
+  final bool Function() canUndo;
+  final VoidCallback onExit;
+
+  const SplitTodoPage({
+    super.key,
+    required this.root,
+    required this.onSave,
+    required this.onBeforeChange,
+    required this.onUndo,
+    required this.canUndo,
+    required this.onExit,
+  });
   @override
   State<SplitTodoPage> createState() => _SplitTodoPageState();
 }
 
 class _SplitTodoPageState extends State<SplitTodoPage> {
-  static const _storageKey = 'split_todo_roots_v1';
-  static const _historyLimit = 30;
-  bool _showListsOverview = true;
-
   final _rand = Random();
-  bool _loaded = false;
-
-  // multiple lists
-  List<Task> _roots = [];
-  int _currentIndex = 0;
-
-  // undo stack (snapshots of all lists)
-  final List<String> _history = [];
 
   // NEW: סט של משימות שמכווצות כרגע (UI בלבד, לא נשמר ב־storage)
   final Set<String> _collapsedTaskIds = {};
@@ -37,172 +37,10 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
   @override
   void initState() {
     super.initState();
-    _load();
   }
-
-  Task? get _currentRoot =>
-      _roots.isEmpty ? null : _roots[_currentIndex.clamp(0, _roots.length - 1)];
 
   String _newId() =>
       '${DateTime.now().microsecondsSinceEpoch}_${_rand.nextInt(1 << 20)}';
-
-  Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_storageKey);
-    if (raw != null && raw.isNotEmpty) {
-      try {
-        final list = jsonDecode(raw) as List<dynamic>;
-        _roots =
-            list.map((m) => Task.fromMap(m as Map<String, dynamic>)).toList();
-      } catch (_) {}
-    }
-    setState(() => _loaded = true);
-
-    // Apply initial auto-collapse once data is loaded
-    _applyAutoCollapse();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _roots.isEmpty) _promptForNewList();
-    });
-  }
-
-  Future<void> _save() async {
-    final prefs = await SharedPreferences.getInstance();
-    final jsonStr = jsonEncode(_roots.map((r) => r.toMap()).toList());
-    await prefs.setString(_storageKey, jsonStr);
-  }
-
-  void _snapshot() {
-    final snap = jsonEncode(_roots.map((r) => r.toMap()).toList());
-    _history.add(snap);
-    if (_history.length > _historyLimit) _history.removeAt(0);
-  }
-
-  bool get _canUndo => _history.isNotEmpty;
-
-  void _undo() {
-    if (!_canUndo) return;
-    final last = _history.removeLast();
-    try {
-      final list = jsonDecode(last) as List<dynamic>;
-      setState(() {
-        _roots =
-            list.map((m) => Task.fromMap(m as Map<String, dynamic>)).toList();
-        if (_roots.isEmpty) {
-          _currentIndex = 0;
-        } else {
-          _currentIndex = _currentIndex.clamp(0, _roots.length - 1);
-        }
-      });
-      _save();
-    } catch (_) {}
-  }
-
-  // list ops
-  void _promptForNewList() {
-    final ctl = TextEditingController();
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        title: const Text("Create a new list"),
-        content: TextField(
-          controller: ctl,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'Final goal (e.g., Build a portfolio website)',
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (_) => _createList(ctl.text),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => _createList(ctl.text),
-            child: const Text('Create'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _createList(String title) {
-    Navigator.of(context).maybePop();
-    final t = title.trim();
-    if (t.isEmpty) return;
-    _snapshot();
-    final root = Task(id: _newId(), title: t);
-    setState(() {
-      _roots.add(root);
-      _currentIndex = _roots.length - 1;
-    });
-    _save();
-  }
-
-  void _renameCurrentList() {
-    final r = _currentRoot;
-    if (r == null) return;
-    final ctl = TextEditingController(text: r.title);
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Rename list'),
-        content: TextField(
-          controller: ctl,
-          autofocus: true,
-          decoration: const InputDecoration(border: OutlineInputBorder()),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-              final t = ctl.text.trim();
-              if (t.isEmpty) return;
-              _snapshot();
-              setState(() => r.title = t);
-              _save();
-              Navigator.pop(context);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _deleteCurrentList() async {
-    final r = _currentRoot;
-    if (r == null) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete this list?'),
-        content: Text('This will delete “${r.title}” and all its tasks.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Delete')),
-        ],
-      ),
-    );
-    if (ok == true) {
-      _snapshot();
-      setState(() {
-        _roots.removeAt(_currentIndex);
-        if (_roots.isEmpty) {
-          _currentIndex = 0;
-        } else {
-          _currentIndex = (_currentIndex - 1).clamp(0, _roots.length - 1);
-        }
-      });
-      _save();
-      if (_roots.isEmpty) _promptForNewList();
-    }
-  }
 
   // helpers
   Task _rootOf(Task t) {
@@ -232,20 +70,11 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
       return;
     }
     final r = _rootOf(t);
-    _snapshot();
+    widget.onBeforeChange?.call();
     setState(() {
       r.currentId = t.id;
     });
-    _save();
-    _applyAutoCollapse();
-  }
-
-  void _clearCurrentOf(Task r) {
-    _snapshot();
-    setState(() {
-      r.currentId = null;
-    });
-    _save();
+    widget.onSave();
     _applyAutoCollapse();
   }
 
@@ -280,7 +109,7 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
     if (t.parent == null) return;
 
     final root = _rootOf(t);
-    _snapshot();
+    widget.onBeforeChange?.call();
 
     if (root.currentId != null && _subtreeContainsId(t, root.currentId!)) {
       root.currentId = null;
@@ -289,7 +118,7 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
     t.parent!.children.removeWhere((c) => identical(c, t) || c.id == t.id);
 
     setState(() {});
-    _save();
+    widget.onSave();
   }
 
   // ---------- Completion reflection ----------
@@ -340,7 +169,7 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
       ),
     );
 
-    _snapshot();
+    widget.onBeforeChange?.call();
     setState(() {
       task.done = true;
       task.completedAt = DateTime.now();
@@ -354,7 +183,7 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
         task.completionNote = null;
       }
     });
-    _save();
+    widget.onSave();
   }
 
   void _splitTaskN(Task parent, List<String> titles,
@@ -367,12 +196,12 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
     }
     if (newChildren.length < (allowSingle ? 1 : 2)) return;
 
-    _snapshot();
+    widget.onBeforeChange?.call();
     setState(() {
       parent.children.addAll(newChildren);
       parent.done = false;
     });
-    _save();
+    widget.onSave();
   }
 
   void _showSplitDialog(Task task) {
@@ -496,9 +325,9 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
                           Navigator.pop(ctx);
                           await _promptCompletion(task);
                         } else {
-                          _snapshot();
+                          widget.onBeforeChange?.call();
                           setState(() => task.done = v);
-                          _save();
+                          widget.onSave();
                         }
                       },
                     ),
@@ -538,10 +367,10 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
                                   initialDate: due ?? now,
                                 );
                                 if (picked != null) {
-                                  _snapshot();
+                                  widget.onBeforeChange?.call();
                                   setState(() => task.due = picked);
                                   due = picked;
-                                  _save();
+                                  widget.onSave();
                                 }
                               },
                               child: const Text('Pick'),
@@ -549,10 +378,10 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
                             if (due != null)
                               TextButton(
                                 onPressed: () {
-                                  _snapshot();
+                                  widget.onBeforeChange?.call();
                                   setState(() => task.due = null);
                                   due = null;
-                                  _save();
+                                  widget.onSave();
                                 },
                                 child: const Text('Clear'),
                               ),
@@ -657,9 +486,9 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
                     if (task.children.isNotEmpty)
                       OutlinedButton.icon(
                         onPressed: () {
-                          _snapshot();
+                          widget.onBeforeChange?.call();
                           setState(() => task.children.clear());
-                          _save();
+                          widget.onSave();
                         },
                         icon: const Icon(Icons.clear_all),
                         label: const Text('Clear subtasks'),
@@ -686,13 +515,13 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
                     icon: const Icon(Icons.check),
                     onPressed: () {
                       final t = titleCtl.text.trim();
-                      _snapshot();
+                      widget.onBeforeChange?.call();
                       setState(() {
                         if (t.isNotEmpty) task.title = t;
                         task.notes = notesCtl.text;
                         task.done = done;
                       });
-                      _save();
+                      widget.onSave();
                       Navigator.pop(ctx);
                     },
                   ),
@@ -793,9 +622,9 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
                     if (v == true && task.done == false) {
                       await _promptCompletion(task);
                     } else {
-                      _snapshot();
+                      widget.onBeforeChange?.call();
                       setState(() => task.done = v ?? false);
-                      _save();
+                      widget.onSave();
                     }
                   },
                 ),
@@ -912,9 +741,7 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
   }
 
   void _applyAutoCollapse() {
-    final root = _currentRoot;
-    if (root == null) return;
-
+    final Task root = widget.root;
     final Set<String> collapsed = {};
 
     // 1) Collapse all tasks that have children
@@ -975,49 +802,13 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
     });
   }
 
-  void _openListsOverview() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ListsOverviewPage(
-          roots: _roots,
-          onOpenList: (index) {
-            Navigator.pop(context); // close overview
-            setState(() => _currentIndex = index);
-            _applyAutoCollapse();
-          },
-          onCreateNewList: _promptForNewList,
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (!_loaded) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    if (_showListsOverview) {
-      return ListsOverviewPage(
-        roots: _roots,
-        onOpenList: (index) {
-          setState(() {
-            _currentIndex = index;
-            _showListsOverview = false;
-          });
-          _applyAutoCollapse();
-        },
-        onCreateNewList: _promptForNewList,
-      );
-    }
-
-    final r = _currentRoot;
+    final r = widget.root;
 
     // Find current title for banner
     String? currentTitle;
-    if (r != null && r.currentId != null) {
+    if (r.currentId != null) {
       Task? found;
       void search(Task t) {
         if (t.id == r.currentId) {
@@ -1040,44 +831,17 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: _roots.isEmpty
-            ? const Text('Split To-Do')
-            : Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        value: _currentIndex,
-                        isExpanded: true,
-                        items: [
-                          for (int i = 0; i < _roots.length; i++)
-                            DropdownMenuItem(
-                              value: i,
-                              child: Text(
-                                _roots[i].title,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: (v) {
-                          if (v == null) return;
-                          setState(() => _currentIndex = v);
-                          _applyAutoCollapse();
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+        title: const Text('Split To-Do'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.view_module),
-            tooltip: 'All lists',
-            onPressed: _openListsOverview,
-          ),
-          IconButton(
-            tooltip: _canUndo ? 'Undo' : 'Undo (disabled)',
-            onPressed: _canUndo ? _undo : null,
+            tooltip: widget.canUndo() ? 'Undo' : 'Undo (disabled)',
+            onPressed: widget.canUndo()
+                ? () {
+                    widget.onUndo();
+                    setState(() {}); // rebuild this page
+                    _applyAutoCollapse(); // re-sync collapse around CURRENT
+                  }
+                : null,
             icon: const Icon(Icons.undo),
           ),
           IconButton(
@@ -1088,60 +852,6 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
                 MaterialPageRoute(builder: (_) => const AchievementsPage()),
               );
             },
-          ),
-          IconButton(
-            tooltip: 'New list',
-            onPressed: _promptForNewList,
-            icon: const Icon(Icons.playlist_add),
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              switch (value) {
-                case 'rename':
-                  _renameCurrentList();
-                  break;
-                case 'clear_current':
-                  if (r != null) _clearCurrentOf(r);
-                  break;
-                case 'delete':
-                  _deleteCurrentList();
-                  break;
-                case 'reset':
-                  if (r != null) {
-                    _snapshot();
-                    setState(() {
-                      r.children.clear();
-                      r.done = false;
-                      r.due = null;
-                      r.notes = '';
-                      r.currentId = null;
-                    });
-                    _save();
-                  }
-                  break;
-              }
-            },
-            itemBuilder: (ctx) => [
-              const PopupMenuItem(
-                value: 'rename',
-                child: Text('Rename current list'),
-              ),
-              const PopupMenuItem(
-                value: 'clear_current',
-                child: Text('Clear current marker'),
-              ),
-              const PopupMenuItem(
-                value: 'reset',
-                child: Text('Reset current list'),
-              ),
-              const PopupMenuItem(
-                value: 'delete',
-                child: Text(
-                  'Delete current list',
-                  style: TextStyle(color: Colors.red),
-                ),
-              ),
-            ],
           ),
         ],
         bottom: (currentTitle != null)
@@ -1194,52 +904,48 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
-            setState(() => _showListsOverview = true);
+            widget.onExit?.call(); // reset history
+            Navigator.pop(context);
           },
         ),
       ),
-      body: r == null
-          ? const Center(
-              child: Text('Create your first list to get started'),
-            )
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+        children: [
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
               children: [
-                Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: accent,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.flag_rounded, color: onAccent),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Final goal: ${r.title}',
-                          style: TextStyle(
-                            color: onAccent,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
+                Icon(Icons.flag_rounded, color: onAccent),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Final goal: ${r.title}',
+                    style: TextStyle(
+                      color: onAccent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Column(
-                    children: _buildTaskTree(r),
-                  ),
-                ),
-                const SizedBox(height: 24),
               ],
             ),
+          ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Column(
+              children: _buildTaskTree(r),
+            ),
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
     );
   }
 }
