@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:todo_split/pages/achievements_board.dart';
+import 'package:todo_split/pages/lists_overview_page.dart';
 
 import '../models/task.dart';
 import '../utils/color_utils.dart';
@@ -18,6 +19,7 @@ class SplitTodoPage extends StatefulWidget {
 class _SplitTodoPageState extends State<SplitTodoPage> {
   static const _storageKey = 'split_todo_roots_v1';
   static const _historyLimit = 30;
+  bool _showListsOverview = true;
 
   final _rand = Random();
   bool _loaded = false;
@@ -973,11 +975,41 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
     });
   }
 
+  void _openListsOverview() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ListsOverviewPage(
+          roots: _roots,
+          onOpenList: (index) {
+            Navigator.pop(context); // close overview
+            setState(() => _currentIndex = index);
+            _applyAutoCollapse();
+          },
+          onCreateNewList: _promptForNewList,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_loaded) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_showListsOverview) {
+      return ListsOverviewPage(
+        roots: _roots,
+        onOpenList: (index) {
+          setState(() {
+            _currentIndex = index;
+            _showListsOverview = false;
+          });
+          _applyAutoCollapse();
+        },
+        onCreateNewList: _promptForNewList,
       );
     }
 
@@ -1038,6 +1070,11 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
                 ],
               ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.view_module),
+            tooltip: 'All lists',
+            onPressed: _openListsOverview,
+          ),
           IconButton(
             tooltip: _canUndo ? 'Undo' : 'Undo (disabled)',
             onPressed: _canUndo ? _undo : null,
@@ -1154,6 +1191,12 @@ class _SplitTodoPageState extends State<SplitTodoPage> {
                 ),
               )
             : null,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            setState(() => _showListsOverview = true);
+          },
+        ),
       ),
       body: r == null
           ? const Center(
